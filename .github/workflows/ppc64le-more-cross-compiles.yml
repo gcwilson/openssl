@@ -1,0 +1,206 @@
+# Copyright 2021-2026 The OpenSSL Project Authors. All Rights Reserved.
+#
+# Licensed under the Apache License 2.0 (the "License").  You may not use
+# this file except in compliance with the License.  You can obtain a copy
+# in the file LICENSE in the source distribution or at
+# https://www.openssl.org/source/license.html
+
+name: Cross Compile for POWER/ppc64le Extensions
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, synchronize]
+  push:
+  schedule:
+    - cron: '35 02 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cross-compilation-ppc64le:
+    # pull request title contains 'ppc64le' or 'power'
+    # pull request title contains 'POWER' or 'PPC64LE'
+    # pull request body contains '[ppc64le ci]'
+    # push event commit message contains '[ppc64le ci]'
+    # cron job
+    # manual dispatch
+    if: contains(github.event.pull_request.title, 'ppc64le') || contains(github.event.pull_request.title, 'power') || contains(github.event.pull_request.title, 'POWER') || contains(github.event.pull_request.title, 'PPC64LE') || contains(github.event.pull_request.body, '[ppc64le ci]') || contains(github.event.head_commit.message, '[ppc64le ci]') || (github.event_name == 'schedule' && github.repository == 'openssl/openssl') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        # The platform matrix specifies:
+        #   arch: the architecture to build for, this defines the tool-chain
+        #         prefix {arch}- and the Debian compiler package gcc-{arch}
+        #         name.
+        #   libs: the Debian package for the necessary link/runtime libraries.
+        #   target: the OpenSSL configuration target to use, this is passed
+        #           directly to the config command line.
+        #   fips:   set to "no" to disable building FIPS, leave unset to
+        #           build the FIPS provider.
+        #   tests: omit this to run all the tests using QEMU, set it to "none"
+        #          to never run the tests, otherwise its value is passed to
+        #          the "make test" command to allow selective disabling of
+        #          tests.
+        #   qemucpu: optional; string that describes CPU properties.
+        #            The string will be used to set the QEMU_CPU variable.
+        #   opensslcapsname: optional; string that describes the postfix of the
+        #                    OpenSSL environment variable that defines CPU
+        #                    capabilities. E.g. "foo" will result in an
+        #                    environment variable with the name OPENSSL_foo.
+        #   opensslcaps: optional; if opensslcapsname (see above) is set, then
+        #                this string will be used as content for the OpenSSL
+        #                capabilities variable.
+        #   ppa:   Launchpad PPA repository to download packages from.
+        platform: [
+          {
+            # POWER8 baseline (ISA 2.07)
+            # Capabilities: ALTIVEC + CRYPTO207 + FPU + MFSPR268
+            # 0x02 + 0x04 + 0x08 + 0x40 = 0x4E
+            #   crypto/aes/asm/aesp8-ppc.pl
+            #   crypto/sha/asm/sha512p8-ppc.pl
+            #   crypto/chacha/asm/chacha-ppc.pl
+            #   crypto/poly1305/asm/poly1305-ppc.pl
+            arch: powerpc64le-linux-gnu,
+            libs: libc6-dev-ppc64el-cross,
+            target: linux-ppc64le,
+            fips: no,
+            qemucpu: "power8",
+            opensslcapsname: ppccap,
+            opensslcaps: "0x4E"
+          }, {
+            # POWER9 (ISA 3.00)
+            # Capabilities: ALTIVEC + CRYPTO207 + FPU + MADD300 + MFSPR268
+            # 0x02 + 0x04 + 0x08 + 0x10 + 0x40 = 0x5E
+            #   crypto/aes/asm/aesp8-ppc.pl (enhanced)
+            #   crypto/sha/asm/sha512p8-ppc.pl (enhanced)
+            #   crypto/modes/asm/ghashp8-ppc.pl
+            arch: powerpc64le-linux-gnu,
+            libs: libc6-dev-ppc64el-cross,
+            target: linux-ppc64le,
+            fips: no,
+            qemucpu: "power9",
+            opensslcapsname: ppccap,
+            opensslcaps: "0x5E"
+          }, {
+            # POWER10 (ISA 3.1)
+            # Capabilities: ALTIVEC + CRYPTO207 + FPU + MADD300 + MFSPR268 + BRD31
+            # 0x02 + 0x04 + 0x08 + 0x10 + 0x40 + 0x80 = 0xDE
+            #   crypto/aes/asm/aesp8-ppc.pl (full optimization)
+            #   crypto/sha/asm/sha512p8-ppc.pl (full optimization)
+            #   crypto/modes/asm/ghashp8-ppc.pl (enhanced)
+            #   crypto/chacha/asm/chacha-ppc.pl (ISA 3.1 optimizations)
+            #   crypto/bn/asm/ppc-mont.pl
+            arch: powerpc64le-linux-gnu,
+            libs: libc6-dev-ppc64el-cross,
+            target: linux-ppc64le,
+            fips: no,
+            qemucpu: "power10",
+            opensslcapsname: ppccap,
+            opensslcaps: "0xDE"
+          }, {
+            # POWER8 without crypto extensions (testing fallback paths)
+            # Capabilities: ALTIVEC + FPU + MFSPR268 (no CRYPTO207)
+            # 0x02 + 0x08 + 0x40 = 0x4A
+            arch: powerpc64le-linux-gnu,
+            libs: libc6-dev-ppc64el-cross,
+            target: linux-ppc64le,
+            fips: no,
+            qemucpu: "power8",
+            opensslcapsname: ppccap,
+            opensslcaps: "0x4A"
+          }, {
+            # POWER9 with VSX disabled (testing scalar paths)
+            # Capabilities: CRYPTO207 + FPU + MADD300 + MFSPR268 (no ALTIVEC)
+            # 0x04 + 0x08 + 0x10 + 0x40 = 0x5C
+            arch: powerpc64le-linux-gnu,
+            libs: libc6-dev-ppc64el-cross,
+            target: linux-ppc64le,
+            fips: no,
+            qemucpu: "power9",
+            opensslcapsname: ppccap,
+            opensslcaps: "0x5C"
+          }
+        ]
+    runs-on: ubuntu-latest
+    steps:
+    - name: install package repository
+      if: matrix.platform.ppa != ''
+      run: |
+        sudo add-apt-repository ppa:${{ matrix.platform.ppa }}
+    - name: install packages
+      run: |
+        sudo apt-get update
+        sudo apt-get -yq --allow-unauthenticated --allow-downgrades --allow-remove-essential --allow-change-held-packages install \
+            gcc-${{ matrix.platform.arch }} \
+            ${{ matrix.platform.libs }}
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+    - name: checkout fuzz/corpora submodule
+      run: git submodule update --init --depth 1 fuzz/corpora
+
+    - name: config with FIPS
+      if: matrix.platform.fips != 'no'
+      run: |
+        ./config --banner=Configured --strict-warnings enable-fips enable-lms \
+                 --cross-compile-prefix=${{ matrix.platform.arch }}- \
+                 ${{ matrix.platform.target }}
+    - name: config without FIPS
+      if: matrix.platform.fips == 'no'
+      run: |
+        ./config --banner=Configured --strict-warnings enable-lms \
+                 --cross-compile-prefix=${{ matrix.platform.arch }}- \
+                 ${{ matrix.platform.target }}
+    - name: config dump
+      run: ./configdata.pm --dump
+
+    - name: make
+      run: make -s -j4
+
+    - name: install qemu
+      if: matrix.platform.tests != 'none'
+      run: sudo apt-get -yq --allow-unauthenticated --allow-downgrades --allow-remove-essential --allow-change-held-packages install qemu-user
+
+    - name: Set QEMU environment
+      if: matrix.platform.qemucpu != ''
+      run: echo "QEMU_CPU=${{ matrix.platform.qemucpu }}" >> $GITHUB_ENV
+
+    - name: Set OpenSSL caps environment
+      if: matrix.platform.opensslcapsname != ''
+      run: echo "OPENSSL_${{ matrix.platform.opensslcapsname }}=\
+                 ${{ matrix.platform.opensslcaps }}" >> $GITHUB_ENV
+
+    - name: get cpu info
+      run: cat /proc/cpuinfo
+
+    - name: get openssl cpu info
+      if: matrix.platform.tests != 'none'
+      run: QEMU_LD_PREFIX=/usr/${{ matrix.platform.arch }} ./util/opensslwrap.sh info -cpusettings
+
+    - name: make all tests
+      if: github.event_name == 'push' && matrix.platform.tests == ''
+      run: |
+        .github/workflows/make-test \
+                  TESTS="-test_afalg" \
+                  QEMU_LD_PREFIX=/usr/${{ matrix.platform.arch }}
+    - name: make some tests
+      if: github.event_name == 'push' && matrix.platform.tests != 'none' && matrix.platform.tests != ''
+      run: |
+        .github/workflows/make-test \
+                  TESTS="${{ matrix.platform.tests }} -test_afalg" \
+                  QEMU_LD_PREFIX=/usr/${{ matrix.platform.arch }}
+    - name: make evp tests
+      if: github.event_name == 'pull_request' && matrix.platform.tests != 'none'
+      run: |
+        .github/workflows/make-test \
+                  TESTS="test_evp*" \
+                  QEMU_LD_PREFIX=/usr/${{ matrix.platform.arch }}
+    - name: save artifacts
+      if: success() || failure()
+      uses: actions/upload-artifact@v5
+      with:
+        name: "cross-compiles-ppc64le@${{ matrix.platform.opensslcaps }}"
+        path: artifacts.tar.gz
+        if-no-files-found: ignore
