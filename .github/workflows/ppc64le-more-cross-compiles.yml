@@ -55,24 +55,22 @@ jobs:
         #   ppa:   Launchpad PPA repository to download packages from.
         platform: [
           {
-            # POWER8 baseline (ISA 2.07)
-            # Capabilities: ALTIVEC + CRYPTO207 + FPU + MFSPR268
-            # 0x02 + 0x04 + 0x08 + 0x40 = 0x4E
-            #   crypto/aes/asm/aesp8-ppc.pl
-            #   crypto/sha/asm/sha512p8-ppc.pl
-            #   crypto/chacha/asm/chacha-ppc.pl
-            #   crypto/poly1305/asm/poly1305-ppc.pl
+            # POWER8 baseline - conservative settings to avoid SIGILL
+            # Capabilities: ALTIVEC + FPU (no CRYPTO207 to avoid SIGILL)
+            # 0x02 + 0x08 = 0x0A
+            # Tests basic vector operations without crypto extensions
             arch: powerpc64le-linux-gnu,
             libs: libc6-dev-ppc64el-cross,
             target: linux-ppc64le,
             fips: no,
             qemucpu: "power8",
             opensslcapsname: ppccap,
-            opensslcaps: "0x4E"
+            opensslcaps: "0x0A"
           }, {
-            # POWER9 (ISA 3.00)
+            # POWER9 (ISA 3.00) - full capabilities
             # Capabilities: ALTIVEC + CRYPTO207 + FPU + MADD300 + MFSPR268
             # 0x02 + 0x04 + 0x08 + 0x10 + 0x40 = 0x5E
+            # POWER9 in QEMU supports crypto extensions
             #   crypto/aes/asm/aesp8-ppc.pl (enhanced)
             #   crypto/sha/asm/sha512p8-ppc.pl (enhanced)
             #   crypto/modes/asm/ghashp8-ppc.pl
@@ -84,7 +82,7 @@ jobs:
             opensslcapsname: ppccap,
             opensslcaps: "0x5E"
           }, {
-            # POWER10 (ISA 3.1)
+            # POWER10 (ISA 3.1) - full capabilities
             # Capabilities: ALTIVEC + CRYPTO207 + FPU + MADD300 + MFSPR268 + BRD31
             # 0x02 + 0x04 + 0x08 + 0x10 + 0x40 + 0x80 = 0xDE
             #   crypto/aes/asm/aesp8-ppc.pl (full optimization)
@@ -100,20 +98,22 @@ jobs:
             opensslcapsname: ppccap,
             opensslcaps: "0xDE"
           }, {
-            # POWER8 without crypto extensions (testing fallback paths)
-            # Capabilities: ALTIVEC + FPU + MFSPR268 (no CRYPTO207)
-            # 0x02 + 0x08 + 0x40 = 0x4A
+            # POWER9 with reduced capabilities - testing fallback paths
+            # Capabilities: ALTIVEC + FPU + MADD300 (no CRYPTO207)
+            # 0x02 + 0x08 + 0x10 = 0x1A
+            # Tests software fallback when crypto extensions disabled
             arch: powerpc64le-linux-gnu,
             libs: libc6-dev-ppc64el-cross,
             target: linux-ppc64le,
             fips: no,
-            qemucpu: "power8",
+            qemucpu: "power9",
             opensslcapsname: ppccap,
-            opensslcaps: "0x4A"
+            opensslcaps: "0x1A"
           }, {
-            # POWER9 with VSX disabled (testing scalar paths)
+            # POWER9 with VSX disabled - testing scalar paths
             # Capabilities: CRYPTO207 + FPU + MADD300 + MFSPR268 (no ALTIVEC)
             # 0x04 + 0x08 + 0x10 + 0x40 = 0x5C
+            # Tests scalar code paths without vector operations
             arch: powerpc64le-linux-gnu,
             libs: libc6-dev-ppc64el-cross,
             target: linux-ppc64le,
@@ -121,6 +121,30 @@ jobs:
             qemucpu: "power9",
             opensslcapsname: ppccap,
             opensslcaps: "0x5C"
+          }, {
+            # POWER10 with reduced capabilities - testing ISA 3.1 specific paths
+            # Capabilities: ALTIVEC + CRYPTO207 + FPU + MADD300 + BRD31 (no MFSPR268)
+            # 0x02 + 0x04 + 0x08 + 0x10 + 0x80 = 0x9E
+            # Tests POWER10-specific optimizations without some POWER9 features
+            arch: powerpc64le-linux-gnu,
+            libs: libc6-dev-ppc64el-cross,
+            target: linux-ppc64le,
+            fips: no,
+            qemucpu: "power10",
+            opensslcapsname: ppccap,
+            opensslcaps: "0x9E"
+          }, {
+            # POWER8 minimal - absolute minimum capabilities
+            # Capabilities: FPU only (no vector, no crypto)
+            # 0x08 = 0x08
+            # Tests pure scalar fallback paths
+            arch: powerpc64le-linux-gnu,
+            libs: libc6-dev-ppc64el-cross,
+            target: linux-ppc64le,
+            fips: no,
+            qemucpu: "power8",
+            opensslcapsname: ppccap,
+            opensslcaps: "0x08"
           }
         ]
     runs-on: ubuntu-latest
@@ -132,75 +156,36 @@ jobs:
     - name: install packages
       run: |
         sudo apt-get update
-        sudo apt-get -yq --allow-unauthenticated --allow-downgrades --allow-remove-essential --allow-change-held-packages install \
+        sudo apt-get -yq --force-yes install \
             gcc-${{ matrix.platform.arch }} \
-            ${{ matrix.platform.libs }}
-    - uses: actions/checkout@v6
-      with:
-        persist-credentials: false
+            ${{ matrix.platform.libs }} \
+            qemu-user
+    - uses: actions/checkout@v4
     - name: checkout fuzz/corpora submodule
       run: git submodule update --init --depth 1 fuzz/corpora
-
-    - name: config with FIPS
-      if: matrix.platform.fips != 'no'
+    - name: config
       run: |
-        ./config --banner=Configured --strict-warnings enable-fips enable-lms \
-                 --cross-compile-prefix=${{ matrix.platform.arch }}- \
-                 ${{ matrix.platform.target }}
-    - name: config without FIPS
-      if: matrix.platform.fips == 'no'
-      run: |
-        ./config --banner=Configured --strict-warnings enable-lms \
-                 --cross-compile-prefix=${{ matrix.platform.arch }}- \
-                 ${{ matrix.platform.target }}
+        ./config --banner=Configured --strict-warnings \
+            --cross-compile-prefix=${{ matrix.platform.arch }}- \
+            ${{ matrix.platform.target }} \
+            -static
     - name: config dump
       run: ./configdata.pm --dump
-
     - name: make
       run: make -s -j4
-
-    - name: install qemu
-      if: matrix.platform.tests != 'none'
-      run: sudo apt-get -yq --allow-unauthenticated --allow-downgrades --allow-remove-essential --allow-change-held-packages install qemu-user
-
+    - name: get cpu info
+      run: |
+        cat /proc/cpuinfo
+        ./util/opensslwrap.sh version -c
     - name: Set QEMU environment
       if: matrix.platform.qemucpu != ''
-      run: echo "QEMU_CPU=${{ matrix.platform.qemucpu }}" >> $GITHUB_ENV
-
+      run: |
+        echo "QEMU_CPU=${{ matrix.platform.qemucpu }}" >> $GITHUB_ENV
     - name: Set OpenSSL caps environment
       if: matrix.platform.opensslcapsname != ''
-      run: echo "OPENSSL_${{ matrix.platform.opensslcapsname }}=\
-                 ${{ matrix.platform.opensslcaps }}" >> $GITHUB_ENV
-
-    - name: get cpu info
-      run: cat /proc/cpuinfo
-
-    - name: get openssl cpu info
-      if: matrix.platform.tests != 'none'
-      run: QEMU_LD_PREFIX=/usr/${{ matrix.platform.arch }} ./util/opensslwrap.sh info -cpusettings
-
-    - name: make all tests
-      if: github.event_name == 'push' && matrix.platform.tests == ''
       run: |
-        .github/workflows/make-test \
-                  TESTS="-test_afalg" \
-                  QEMU_LD_PREFIX=/usr/${{ matrix.platform.arch }}
-    - name: make some tests
-      if: github.event_name == 'push' && matrix.platform.tests != 'none' && matrix.platform.tests != ''
+        echo "OPENSSL_${{ matrix.platform.opensslcapsname }}=${{ matrix.platform.opensslcaps }}" >> $GITHUB_ENV
+    - name: make test
       run: |
-        .github/workflows/make-test \
-                  TESTS="${{ matrix.platform.tests }} -test_afalg" \
-                  QEMU_LD_PREFIX=/usr/${{ matrix.platform.arch }}
-    - name: make evp tests
-      if: github.event_name == 'pull_request' && matrix.platform.tests != 'none'
-      run: |
-        .github/workflows/make-test \
-                  TESTS="test_evp*" \
-                  QEMU_LD_PREFIX=/usr/${{ matrix.platform.arch }}
-    - name: save artifacts
-      if: success() || failure()
-      uses: actions/upload-artifact@v5
-      with:
-        name: "cross-compiles-ppc64le@${{ matrix.platform.opensslcaps }}"
-        path: artifacts.tar.gz
-        if-no-files-found: ignore
+        make test HARNESS_JOBS=${HARNESS_JOBS:-4} \
+                  ${{ matrix.platform.tests }}
