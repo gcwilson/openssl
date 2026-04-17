@@ -53,20 +53,12 @@ jobs:
         #                this string will be used as content for the OpenSSL
         #                capabilities variable.
         #   ppa:   Launchpad PPA repository to download packages from.
+        #
+        # NOTE: POWER8 configurations removed due to SIGILL in QEMU user-mode
+        #       emulation. QEMU's power8 CPU model is not compatible with
+        #       cross-compiled ppc64le binaries in user-mode.
         platform: [
           {
-            # POWER8 baseline - conservative settings to avoid SIGILL
-            # Capabilities: ALTIVEC + FPU (no CRYPTO207 to avoid SIGILL)
-            # 0x02 + 0x08 = 0x0A
-            # Tests basic vector operations without crypto extensions
-            arch: powerpc64le-linux-gnu,
-            libs: libc6-dev-ppc64el-cross,
-            target: linux-ppc64le,
-            fips: no,
-            qemucpu: "power8",
-            opensslcapsname: ppccap,
-            opensslcaps: "0x0A"
-          }, {
             # POWER9 (ISA 3.00) - full capabilities
             # Capabilities: ALTIVEC + CRYPTO207 + FPU + MADD300 + MFSPR268
             # 0x02 + 0x04 + 0x08 + 0x10 + 0x40 = 0x5E
@@ -134,15 +126,27 @@ jobs:
             opensslcapsname: ppccap,
             opensslcaps: "0x9E"
           }, {
-            # POWER8 minimal - absolute minimum capabilities
+            # POWER9 minimal - FPU only for baseline scalar testing
             # Capabilities: FPU only (no vector, no crypto)
             # 0x08 = 0x08
-            # Tests pure scalar fallback paths
+            # Tests pure scalar fallback paths on POWER9
             arch: powerpc64le-linux-gnu,
             libs: libc6-dev-ppc64el-cross,
             target: linux-ppc64le,
             fips: no,
-            qemucpu: "power8",
+            qemucpu: "power9",
+            opensslcapsname: ppccap,
+            opensslcaps: "0x08"
+          }, {
+            # POWER10 minimal - FPU only for baseline scalar testing
+            # Capabilities: FPU only (no vector, no crypto)
+            # 0x08 = 0x08
+            # Tests pure scalar fallback paths on POWER10
+            arch: powerpc64le-linux-gnu,
+            libs: libc6-dev-ppc64el-cross,
+            target: linux-ppc64le,
+            fips: no,
+            qemucpu: "power10",
             opensslcapsname: ppccap,
             opensslcaps: "0x08"
           }
